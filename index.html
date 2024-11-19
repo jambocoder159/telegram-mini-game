@@ -199,44 +199,53 @@
         <div class="play-area">
             <div id="target" class="target hidden"></div>
         </div>
-        <button id="startButton" class="start-button">開始遊戲</button>
+        <button id="start" class="start-button">開始遊戲</button>
         <div class="high-score">
             最高分: <span id="highScore">0</span>
         </div>
     </div>
 
     <script>
-        let tg = window.Telegram.WebApp;
-        tg.expand();
-
-        // Telegram Bot 配置
-        const BOT_TOKEN = '7657307117:AAHuR0xF3TOxWYo3EMr8QcC8st04wjrc7lQ';
-        const TELEGRAM_API = 'https://api.telegram.org/bot' + BOT_TOKEN;
-
-        let score = 0;
-        let timeLeft = 30;
-        let gameInterval;
-        let highScore = localStorage.getItem('highScore') || 0;
-        let combo = 0;
-        let lastClickTime = 0;
+        const tg = window.Telegram.WebApp;
+        const botToken = '7657307117:AAHuR0xF3TOxWYo3EMr8QcC8st04wjrc7lQ';
         
         const scoreElement = document.getElementById('score');
         const timeElement = document.getElementById('time');
         const targetElement = document.getElementById('target');
-        const startButton = document.getElementById('startButton');
-        const highScoreElement = document.getElementById('highScore');
-        const playArea = document.querySelector('.play-area');
-        const timerDisplay = document.querySelector('.timer');
+        const startButton = document.getElementById('start');
+        const timerDisplay = document.getElementById('timer');
         const scoreBoard = document.querySelector('.score-board');
-
+        const playArea = document.querySelector('.play-area');
+        const highScoreElement = document.querySelector('.high-score span');
+        
+        let score = 0;
+        let timeLeft = 30;
+        let combo = 0;
+        let gameInterval;
+        let highScore = parseInt(localStorage.getItem('highScore')) || 0;
         highScoreElement.textContent = highScore;
+        
+        // 安全措施：添加點擊相關變數
+        let lastClickTime = 0;
+        const CLICK_COOLDOWN = 300; // 點擊冷卻時間（毫秒）
+        const MAX_COMBO = 10; // 最大連擊數
+        let clicksInLastSecond = 0;
+        let lastSecondStart = Date.now();
+        const MAX_CLICKS_PER_SECOND = 5; // 每秒最大點擊次數
+        
+        // 安全措施：生成簽名
+        function generateSignature(score, timestamp) {
+            // 簡單的簽名方法，實際應用中應使用更強的加密
+            const secret = 'your-secret-key';
+            return btoa(`${score}-${timestamp}-${secret}`);
+        }
 
         function createClickEffect(x, y) {
             const effect = document.createElement('div');
             effect.className = 'click-effect';
             effect.style.left = x + 'px';
             effect.style.top = y + 'px';
-            playArea.appendChild(effect);
+            targetElement.appendChild(effect);
             
             effect.addEventListener('animationend', () => {
                 effect.remove();
@@ -256,48 +265,63 @@
             });
         }
 
-        async function sendScoreToBot(score) {
-            try {
-                const userId = tg.initDataUnsafe?.user?.id;
-                if (!userId) return;
-
-                const message = `🎮 遊戲結束!\n🏆 最終得分：${score}分\n${score > highScore ? '🌟 新紀錄！' : ''}`;
-                const url = `${TELEGRAM_API}/sendMessage`;
-                
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        chat_id: userId,
-                        text: message,
-                        parse_mode: 'HTML'
-                    })
-                });
-
-                const data = await response.json();
-                console.log('Score sent:', data);
-            } catch (error) {
-                console.error('Error sending score:', error);
-            }
+        function sendScoreToBot(score) {
+            // 安全措施：添加時間戳和簽名
+            const timestamp = Date.now();
+            const signature = generateSignature(score, timestamp);
+            
+            const chatId = tg.initDataUnsafe?.user?.id;
+            if (!chatId) return;
+            
+            const message = `🎮 遊戲結束！\n👤 玩家：${tg.initDataUnsafe?.user?.first_name || 'Unknown'}\n🎯 得分：${score}\n🏆 最高分：${highScore}`;
+            
+            fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Score-Signature': signature,
+                    'X-Score-Timestamp': timestamp.toString()
+                },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    text: message,
+                    parse_mode: 'HTML'
+                })
+            });
         }
 
         function updateScore(e) {
-            const currentTime = Date.now();
-            if (currentTime - lastClickTime < 1000) {
-                combo++;
-                if (combo > 1) {
-                    showComboText(e.clientX, e.clientY, combo);
-                }
-            } else {
-                combo = 1;
+            // 安全措施：檢查點擊冷卻時間
+            const now = Date.now();
+            if (now - lastClickTime < CLICK_COOLDOWN) {
+                return;
             }
-            lastClickTime = currentTime;
-
-            score += combo;
+            lastClickTime = now;
+            
+            // 安全措施：檢查點擊速率
+            if (now - lastSecondStart >= 1000) {
+                clicksInLastSecond = 0;
+                lastSecondStart = now;
+            }
+            clicksInLastSecond++;
+            if (clicksInLastSecond > MAX_CLICKS_PER_SECOND) {
+                return;
+            }
+            
+            // 計算得分
+            combo = Math.min(combo + 1, MAX_COMBO); // 安全措施：限制最大連擊數
+            const comboMultiplier = Math.min(combo * 0.1 + 1, 2);
+            const points = Math.round(10 * comboMultiplier);
+            score += points;
+            
             scoreElement.textContent = score;
             scoreBoard.classList.add('pulse');
+            
+            // 顯示連擊文字（如果有連擊）
+            if (combo > 1) {
+                const rect = e.target.getBoundingClientRect();
+                showComboText(e.clientX - rect.left, e.clientY - rect.top, combo);
+            }
             
             // 創建點擊效果
             const rect = e.target.getBoundingClientRect();
