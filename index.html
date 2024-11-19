@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Master</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: var(--tg-theme-bg-color, #fff);
+            color: var(--tg-theme-text-color, #000);
+            min-height: 100vh;
+        }
+
+        .game-container {
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+            padding: 20px;
+            position: relative;
+            flex: 1;
+        }
+
+        .score-board {
+            font-size: 24px;
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 10px;
+            background-color: var(--tg-theme-secondary-bg-color, #f5f5f5);
+            position: relative;
+            z-index: 2;
+        }
+
+        .timer {
+            font-size: 20px;
+            margin-bottom: 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .play-area {
+            position: relative;
+            width: 100%;
+            height: 300px;
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .target {
+            width: 80px;
+            height: 80px;
+            background-color: #2481cc;
+            border-radius: 50%;
+            position: absolute;
+            cursor: pointer;
+            transition: transform 0.1s;
+            animation: pulse 1s infinite;
+            z-index: 1;
+        }
+
+        .target:active {
+            transform: scale(0.95);
+        }
+
+        .start-button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background-color: var(--tg-theme-button-color, #2481cc);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .high-score {
+            margin-top: 20px;
+            font-size: 18px;
+            position: relative;
+            z-index: 2;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="score-board">
+            分數: <span id="score">0</span>
+        </div>
+        <div class="timer" id="timer">
+            時間: <span id="time">30</span>秒
+        </div>
+        <div class="play-area">
+            <div id="target" class="target hidden"></div>
+        </div>
+        <button id="startButton" class="start-button">開始遊戲</button>
+        <div class="high-score">
+            最高分: <span id="highScore">0</span>
+        </div>
+    </div>
+
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // Telegram Bot 配置
+        const BOT_TOKEN = '7657307117:AAHuR0xF3TOxWYo3EMr8QcC8st04wjrc7lQ';
+        const TELEGRAM_API = 'https://api.telegram.org/bot' + BOT_TOKEN;
+
+        let score = 0;
+        let timeLeft = 30;
+        let gameInterval;
+        let highScore = localStorage.getItem('highScore') || 0;
+        
+        const scoreElement = document.getElementById('score');
+        const timeElement = document.getElementById('time');
+        const targetElement = document.getElementById('target');
+        const startButton = document.getElementById('startButton');
+        const highScoreElement = document.getElementById('highScore');
+        const playArea = document.querySelector('.play-area');
+
+        highScoreElement.textContent = highScore;
+
+        // 發送分數到 Telegram Bot
+        async function sendScoreToBot(score) {
+            try {
+                const userId = tg.initDataUnsafe?.user?.id;
+                if (!userId) return;
+
+                const message = `玩家得分：${score}分！`;
+                const url = `${TELEGRAM_API}/sendMessage`;
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: userId,
+                        text: message
+                    })
+                });
+
+                const data = await response.json();
+                console.log('Score sent:', data);
+            } catch (error) {
+                console.error('Error sending score:', error);
+            }
+        }
+
+        function updateScore() {
+            score++;
+            scoreElement.textContent = score;
+            
+            // 在遊戲區域內隨機移動目標
+            const playAreaRect = playArea.getBoundingClientRect();
+            const targetWidth = targetElement.offsetWidth;
+            const targetHeight = targetElement.offsetHeight;
+            
+            const maxX = playAreaRect.width - targetWidth;
+            const maxY = playAreaRect.height - targetHeight;
+            
+            targetElement.style.left = Math.random() * maxX + 'px';
+            targetElement.style.top = Math.random() * maxY + 'px';
+        }
+
+        function startGame() {
+            score = 0;
+            timeLeft = 30;
+            scoreElement.textContent = score;
+            timeElement.textContent = timeLeft;
+            startButton.classList.add('hidden');
+            targetElement.classList.remove('hidden');
+            
+            // 初始化目標位置
+            updateScore();
+            
+            gameInterval = setInterval(() => {
+                timeLeft--;
+                timeElement.textContent = timeLeft;
+                
+                if (timeLeft <= 0) {
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            clearInterval(gameInterval);
+            targetElement.classList.add('hidden');
+            startButton.classList.remove('hidden');
+            startButton.textContent = '再玩一次';
+            
+            // 發送分數到 Telegram Bot
+            sendScoreToBot(score);
+            
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('highScore', highScore);
+                highScoreElement.textContent = highScore;
+                tg.showPopup({
+                    title: '恭喜！',
+                    message: `你創造了新紀錄：${score}分！`,
+                    buttons: [{type: 'ok'}]
+                });
+            } else {
+                tg.showPopup({
+                    title: '遊戲結束',
+                    message: `你的得分：${score}分`,
+                    buttons: [{type: 'ok'}]
+                });
+            }
+        }
+
+        targetElement.addEventListener('click', updateScore);
+        startButton.addEventListener('click', startGame);
+
+        // 設置 Telegram WebApp 主題
+        document.documentElement.style.setProperty('--tg-theme-bg-color', tg.backgroundColor);
+        document.documentElement.style.setProperty('--tg-theme-text-color', tg.textColor);
+        document.documentElement.style.setProperty('--tg-theme-button-color', tg.buttonColor);
+        document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.buttonTextColor);
+    </script>
+</body>
+</html>
